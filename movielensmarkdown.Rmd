@@ -1,0 +1,251 @@
+---
+title: "movielens"
+author: "Sanskriti Srivastava"
+date: "25 May 2019"
+output: html_document
+---
+
+##I. Introduction
+
+A recommender system is a subclass of information filtering system that seeks to predict the “rating” or “preference” a user would give to an item. Recommender systems are utilized in a variety of areas including movies, music, news, books, research articles, search queries, social tags, and products in general. There are also recommender systems for experts, collaborators, jokes, restaurants, garments, financial services, life insurance, online dating, and Twitter pages. This project will build a movie recommendation system using the 10M MovieLens Dataset collected by GroupLens Research, which includes 10,000,000 ratings on 10,000 movies by 72,000 users.
+
+
+##II. Executive Summary
+
+The objective of this project is to train a machine learning algorithm that predicts user ratings (from 0.5 to 5 stars) using the inputs of a provided subset (edx dataset) to predict movie ratings in a provided validation set. The root-mean-square error (RMSE) is a frequently used measure of the differences between values (sample or population values) predicted by a model or an estimator and the values observed. RMSE is a measure of accuracy, to compare forecasting errors of different models for a dataset and not between datasets, as it is scale-dependent. RMSE is always non-negative, and a value of 0 (almost never achieved in practice) would indicate a perfect fit to the data. In general, a lower RMSE is better than a higher one. The following key steps are followed in order to perform the analysis and make the conclusion: 
+• Prepare Data 
+• Summarize Dataset
+ • Visualize Dataset 
+• Evaluate Algorithm 
+• Evaluate Validation set In the project, three models (“Simple Average”, “Movie_Effect” and “Movie+User_Effect”) are developed and their accuracy is assessed using their resulting RMSE. Finally, the best resulting model, “Movie + User_Effect Model” with RMSE of 0.8426, is ran directly on the validation set to predict the movie ratings. The RMSE result on validation dataset of 0.8294 is lower than the results on test dataset of 0.8426, suggesting that the “Moive+User_Effect” model is likely a reliable prediction model.
+
+
+##III. Prepare Data
+###edx dataset
+The following edx section is used to perform the analysis in this project. The ggplot2 package is added to the edx set. 
+
+```{r,echo=FALSE}
+if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
+if(!require(caret)) install.packages("caret", repos = "http://cran.us.r-project.org")
+if(!require(ggplot2)) install.packages("ggplot2", repos = "http://cran.us.r-project.org")
+dl <- tempfile()
+download.file("http://files.grouplens.org/datasets/movielens/ml-10m.zip", dl)
+ratings <- read.table(text = gsub("::", "\t", readLines(unzip(dl, "ml-10M100K/ratings.dat"))),
+col.names = c("userId", "movieId", "rating", "timestamp"))
+movies <- str_split_fixed(readLines(unzip(dl, "ml-10M100K/movies.dat")), "\\::", 3)
+colnames(movies) <- c("movieId", "title", "genres")
+movies <- as.data.frame(movies) %>% mutate(movieId = as.numeric(levels(movieId))[movieId], title = as.character(title), genres = as.character(genres))
+movielens <- left_join(ratings, movies, by = "movieId")
+set.seed(1)
+test_index <- createDataPartition(y = movielens$rating, times = 1, p = 0.1, list = FALSE)
+edx <- movielens[-test_index,]
+temp <- movielens[test_index,]
+validation <- temp %>%
+semi_join(edx, by = "movieId") %>%
+semi_join(edx, by = "userId")
+removed <- anti_join(temp, validation)
+edx <- rbind(edx, removed)
+rm(dl, ratings, movies, test_index, temp, movielens, removed)
+```
+
+###Training and Testing dataset
+The test and training datasets are derived using edx set: 80% sample for training, and 20% sample for testing.
+```{r}
+set.seed(1)
+train_index <- createDataPartition(y = edx$rating, times = 1, p = 0.8, list = FALSE)
+train_set <- edx[train_index,]
+temp <- edx[-train_index,]
+test_set <- temp %>%
+semi_join(train_set, by = "movieId") %>%
+semi_join(train_set, by = "userId")
+removed <- anti_join(temp, test_set)
+train_set <- rbind(train_set, removed)
+rm(temp, removed)
+```
+
+##IV. Summarize Dataset
+The following ways are used to look at the raw data from different perspectives: shape, size, type, general layout.
+```{r}
+summary(edx)
+str(edx)
+dim(edx)
+summary(validation)
+str(validation)
+dim(validation)
+```
+displaying top 10 geneneres
+```{r}
+edx %>% separate_rows(genres, sep = "\\I")%>%
+group_by(genres) %>%
+summarize(count = n()) %>%
+arrange(desc(count))
+```
+
+Displaying top 10 movies
+```{r}
+edx %>% group_by(movieId, title)%>%
+summarize(count = n()) %>%
+arrange(desc(count))
+```
+
+Displaying the top 10 movies by rating
+```{r}
+edx %>% group_by(rating, title)%>%
+summarize(count = n()) %>%
+arrange(desc(count))
+```
+
+##V. Visualize Dataset
+
+Data visualization is most efficient, the fastest and most useful way to summarize and learn about the data. 
+Visualization refers to creating charts and plots from the raw data.
+Plots of the distribution or spread of attributes can help spot outliers or invalid data. 
+Rating Distribution---Users give full-star ratings more frequently than half-star ratings.
+```{r}
+edx %>%
+ggplot(aes(rating)) +
+geom_histogram(binwidth = 0.5, color = "black") +
+scale_x_discrete(limits = c(seq(0.5,5,0.5))) +
+scale_y_continuous(breaks = c(seq(0, 3000000, 500000))) +
+ggtitle("Rating distribution")
+```
+
+Numbers of ratings per user--- A lot of users rate hundreds of movies.
+```{r}
+edx %>% count(userId) %>%
+ggplot(aes(n)) +
+geom_histogram(bins = 30, color = "black") +
+scale_x_log10() +
+xlab("Number of ratings") +
+ylab("Number of users") +
+ggtitle("Number of ratings per user")
+```
+Number of ratings per movie--- Most movies were rated several times. Hundreds and even thousands.
+```{r}
+edx %>%
+count(movieId) %>%
+ggplot(aes(n)) +
+geom_histogram(bins = 30, color = "black") +
+xlab("Number of ratings") +
+ylab("Movie count") +
+scale_x_log10() +
+ggtitle("Number of ratings per movie")
+```
+
+Mean Movie Rating Per User--- After shortlisting those users that have rated at least 100 movies, it is found that most users gave ratings of 3.0, 3.5 and 4.0.
+```{r}
+edx %>%
+group_by(userId) %>%
+filter(n() >= 100) %>%
+summarise(mean_rating = mean(rating)) %>%
+ggplot(aes(mean_rating)) +
+geom_histogram(bins = 30, color = "black") +
+xlab("Mean movie rating") +
+ylab("Number of users") +
+ggtitle("Mean movie rating per user") +
+scale_x_discrete(limits = c(seq(0.5,5,0.5)))
+```
+
+##VI. Evaluate Algorithm
+
+The following RMSE function is used to assess three alogrithms in this section.
+```{r}
+RMSE <- function(true_ratings, predicted_ratings){
+sqrt(mean((true_ratings - predicted_ratings)^2))
+}
+```
+
+###1st model: Simple Average Model 
+The 1st model predicts rating using the dataset's mean rating, and all differences in movie ratings are explained by random variation. Following is the equation used for the calculation: Yu,i = mu + Eu,i
+
+```{r}
+mu_hat <- mean(train_set$rating)
+model_1_rmse <- RMSE(test_set$rating, mu_hat)
+rmse_results <- data_frame(Model = "Simple Average", RMSE = model_1_rmse)
+rmse_results%>%knitr::kable()
+```
+
+###2nd model: Movie_Effect Model 
+Using the average mean rating of all movies may not be appropriae as popular movies are likely rated more than unpopular movies. Hence, in order to improve prediction, the average mean rating of each movie is compared to the average mean rating, and the estimation deviation and the resulting variables ("b" or bias) are used to predict using the follwoing equation: Yu,i = mu + bi + Eu,i
+
+```{r}
+mu <- mean(train_set$rating)
+movie_avgs <- train_set %>%
+group_by(movieId) %>%
+summarize(b_i = mean(rating - mu))
+movie_avgs %>% qplot(b_i, geom ="histogram", bins = 10, data = ., color = I("black"),
+ylab = "Number of movies", main = "Number of movies with the computed b_i")
+```
+
+The above histogram shows that the rating data skew to the left, which is a result of a lower boundary in a dataset, suggesting that most ratings are higher than the mean rating of all movies.
+
+```{r}
+predicted_ratings <- mu + test_set %>%
+left_join(movie_avgs, by='movieId') %>%
+.$b_i
+model_2_rmse <- RMSE(predicted_ratings, test_set$rating)
+rmse_results <- bind_rows(rmse_results,
+data_frame(Model="Movie_Effect",
+RMSE = model_2_rmse ))
+rmse_results %>% knitr::kable()
+```
+
+The RMSE results show that the 2nd model is an improvement of the 1st model.
+
+###3rd model: Movie+User_Effect Model 
+
+It is found that there is substantial variability across users: some users rate many movies while others are selective. Hence, the average rating for user ?? is only computed for those that have rated over 100 movies, and the following equation is used for the prediction: Yu,i = mu + bi + bu + Eu,i
+
+```{r}
+train_set %>%
+group_by(userId) %>%
+summarize(b_u = mean(rating)) %>%
+filter(n()>=100) %>%
+ggplot(aes(b_u)) +
+geom_histogram(bins = 30, color = "black")
+```
+
+The above histogram shows that the rating data are more normally distributed compared to the 2nd Model, suggesting that the 3rd Model may produce more reliable results than the 2nd Model.
+
+```{r}
+user_avgs <- test_set %>%
+left_join(movie_avgs, by='movieId') %>%
+group_by(userId) %>%
+summarize(b_u = mean(rating - mu - b_i))
+```
+
+```{r}
+predicted_ratings <- test_set %>%
+left_join(movie_avgs, by='movieId') %>%
+left_join(user_avgs, by='userId') %>%
+mutate(pred = mu + b_i + b_u) %>%
+.$pred
+model_3_rmse <- RMSE(predicted_ratings, test_set$rating)
+rmse_results <- bind_rows(rmse_results,
+data_frame(Model="Movie + User_Effect",
+RMSE = model_3_rmse ))
+rmse_results %>% knitr::kable()
+```
+
+It is shown that the RMSE is further reduced using the 3rd model.
+
+##VII. Evaluate validation set
+
+Based on the results from the preceding section, the best resulting model, "Movie + User_Effect Model", is ran directly on the validation set to predict the movie ratings. It is found that the RMSE of the validation set is 0.8294.
+```{r}
+user_avgs_validation <- validation %>%
+left_join(movie_avgs, by='movieId') %>%
+group_by(userId) %>%
+summarize(b_u = mean(rating - mu - b_i))
+predicted_ratings <- validation %>%
+left_join(movie_avgs, by='movieId') %>%
+left_join(user_avgs_validation, by='userId') %>%
+mutate(pred = mu + b_i + b_u) %>%
+.$pred
+model_rmse_validation <- RMSE(predicted_ratings, validation$rating)
+model_rmse_validation
+```
+
+##VIII. Conclusion
+
+In this project, three models ("Simple Average", "Movie_Effect" and "Movie+User_Effect") are developed to predict movie rating, and their accuracy is assessed using their resulting RMSE. The best resulting model, "Movie + User Effects Model" with RMSE of 0.8426, is ran directly on the validation set to predict the movie ratings. The RMSE result on validation dataset of 0.8294 is lower than the best results on test dataset of 0.8426 (3rd model), suggesting that the "Movie+User_Effect" model is likely a reliable prediction model.
